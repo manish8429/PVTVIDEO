@@ -54,6 +54,164 @@ const authLimiter = rateLimit({
 
 app.use(globalLimiter);
 
+// ── Root route — branded warning page ───────────────────────────────────────
+app.get('/', (req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PrivetVideo API — Restricted</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      background: #080808;
+      color: #fff;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .bg-grid {
+      position: fixed; inset: 0; z-index: 0;
+      background-image:
+        linear-gradient(rgba(255,60,60,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,60,60,0.04) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+    .glow {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 600px; height: 600px;
+      background: radial-gradient(circle, rgba(220,38,38,0.12) 0%, transparent 70%);
+      pointer-events: none; z-index: 0;
+    }
+    .card {
+      position: relative; z-index: 1;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,60,60,0.25);
+      border-radius: 20px;
+      padding: 48px 40px;
+      max-width: 520px;
+      width: 90%;
+      text-align: center;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 0 60px rgba(220,38,38,0.12), 0 0 0 1px rgba(255,255,255,0.04);
+    }
+    .danger-icon {
+      width: 80px; height: 80px;
+      background: rgba(220,38,38,0.12);
+      border: 2px solid rgba(220,38,38,0.4);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 24px;
+      font-size: 36px;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.3); }
+      50% { box-shadow: 0 0 0 12px rgba(220,38,38,0); }
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(220,38,38,0.1);
+      border: 1px solid rgba(220,38,38,0.3);
+      color: #f87171;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 5px 14px;
+      border-radius: 100px;
+      margin-bottom: 20px;
+    }
+    h1 {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 10px;
+      color: #fff;
+    }
+    .subtitle {
+      font-size: 14px;
+      color: rgba(255,255,255,0.45);
+      line-height: 1.7;
+      margin-bottom: 32px;
+    }
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
+      margin-bottom: 28px;
+    }
+    .dev-label {
+      font-size: 10px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.25);
+      margin-bottom: 10px;
+    }
+    .developer {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      background: linear-gradient(135deg, #fff 30%, rgba(255,255,255,0.5));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .logo-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      background: #ef4444;
+      border-radius: 50%;
+      margin-right: 8px;
+      animation: blink 1.5s ease-in-out infinite;
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; } 50% { opacity: 0.2; }
+    }
+    .footer {
+      position: fixed; bottom: 20px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.15);
+      letter-spacing: 1px;
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-grid"></div>
+  <div class="glow"></div>
+
+  <div class="card">
+    <div class="danger-icon">⚠️</div>
+
+    <div class="badge">
+      <span class="logo-dot"></span>
+      Restricted Access
+    </div>
+
+    <h1>Unauthorized Zone</h1>
+    <p class="subtitle">
+      This is a private API server for <strong style="color:rgba(255,255,255,0.7)">PrivetVideo</strong>.<br />
+      Direct access is not permitted.<br />
+      All requests are logged and monitored.
+    </p>
+
+    <div class="divider"></div>
+
+    <p class="dev-label">Developed & Owned By</p>
+    <p class="developer">✦ Manish Kumar</p>
+  </div>
+
+  <p class="footer">PrivetVideo API &nbsp;·&nbsp; ${new Date().getFullYear()} &nbsp;·&nbsp; All rights reserved</p>
+</body>
+</html>`);
+});
+
 // ── Health check (for UptimeRobot / keepalive ping) ─────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', ts: Date.now() }));
 
