@@ -2,7 +2,7 @@ import express from 'express';
 import Video from '../models/Video.model.js';
 import ApiKey from '../models/ApiKey.model.js';
 import { protect } from '../middleware/auth.middleware.js';
-import { uploadVideo, deleteFromCloudinary } from '../config/cloudinary.js';
+import { uploadVideo, deleteFromCloudinary, cloudinary } from '../config/cloudinary.js';
 import rateLimit from 'express-rate-limit';
 
 const router = express.Router();
@@ -93,6 +93,82 @@ router.post(
     }
   }
 );
+
+// ── GET /api/videos/upload-signature — generate signed Cloudinary params ─────
+// Frontend uses this to upload DIRECTLY to Cloudinary (bypasses Render timeout)
+router.get('/upload-signature', protect, (req, res) => {
+  try {
+    if (!req.user.isUploader && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'No upload permission.' });
+    }
+
+    const timestamp = Math.floor(Date.now() / 1000);
+    const folder = `privetvideosite/videos/${req.user._id}`;
+    const public_id = `video_${Date.now()}`;
+
+    // Sign only the params that the client will send to Cloudinary
+    const paramsToSign = { folder, public_id, timestamp };
+    const signature = cloudinary.utils.api_sign_request(
+      paramsToSign,
+      process.env.CLOUDINARY_API_SECRET
+    );
+
+    res.json({
+      success: true,
+      signature,
+      timestamp,
+      folder,
+      public_id,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    });
+  } catch (err) {
+    console.error('Signature error:', err);
+    res.status(500).json({ success: false, message: 'Failed to generate upload signature' });
+  }
+});
+
+// ── POST /api/videos/save — save metadata after direct Cloudinary upload ──────
+router.post('/save', protect, uploadLimiter, async (req, res) => {
+  try {
+    if (!req.user.isUploader && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'No upload permission.' });
+    }
+
+    const { title, description, tags, cloudinaryUrl, cloudinaryPublicId, size, format } = req.body;
+
+    if (!title?.trim()) {
+      return res.status(400).json({ success: false, message: 'Video title is required' });
+    }
+    if (!cloudinaryUrl || !cloudinaryPublicId) {
+      return res.status(400).json({ success: false, message: 'Cloudinary upload data missing' });
+    }
+
+    // Generate thumbnail from Cloudinary URL
+    const thumbnail = cloudinaryUrl
+      .replace('/upload/', '/upload/so_0,w_640/')
+      .replace(/\.[^.]+$/, '.jpg');
+
+    const video = await Video.create({
+      title: title.trim(),
+      description: description?.trim() || '',
+      cloudinaryUrl,
+      cloudinaryPublicId,
+      thumbnail,
+      size: size || 0,
+      format: format || 'mp4',
+      uploader: req.user._id,
+      tags: tags ? tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
+    });
+
+    await video.populate('uploader', 'name email avatar');
+
+    res.status(201).json({ success: true, message: 'Video uploaded successfully!', video });
+  } catch (err) {
+    console.error('Save video error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Failed to save video' });
+  }
+});
 
 // ── GET /api/videos (my videos) ──────────────────────────────────────────────
 router.get('/', protect, async (req, res) => {

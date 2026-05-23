@@ -1,10 +1,46 @@
 import { useState, useRef, useCallback } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Upload, Video, X, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Upload, Video, X, CheckCircle2, CloudUpload } from 'lucide-react'
 import toast from 'react-hot-toast'
 import api from '../lib/api'
 import Navbar from '../components/layout/Navbar'
+
+// ── Direct Cloudinary upload via XHR (bypasses Render — no timeout) ──────────
+function uploadDirectToCloudinary(
+  file: File,
+  sigData: {
+    cloud_name: string; api_key: string; timestamp: number;
+    signature: string; folder: string; public_id: string;
+  },
+  onProgress: (pct: number) => void
+): Promise<{ secure_url: string; public_id: string; bytes: number; format: string }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('api_key', sigData.api_key)
+    fd.append('timestamp', String(sigData.timestamp))
+    fd.append('signature', sigData.signature)
+    fd.append('folder', sigData.folder)
+    fd.append('public_id', sigData.public_id)
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 95))
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText))
+      } else {
+        const err = JSON.parse(xhr.responseText || '{}')
+        reject(new Error(err.error?.message || 'Cloudinary upload failed'))
+      }
+    }
+    xhr.onerror = () => reject(new Error('Network error during upload'))
+    xhr.open('POST', `https://api.cloudinary.com/v1_1/${sigData.cloud_name}/video/upload`)
+    xhr.send(fd)
+  })
+}
 
 export default function UploadPage() {
   const navigate = useNavigate()
@@ -14,6 +50,7 @@ export default function UploadPage() {
   const [form, setForm] = useState({ title: '', description: '', tags: '' })
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [uploadStatus, setUploadStatus] = useState('')
   const [uploaded, setUploaded] = useState(false)
   const [uploadedVideoId, setUploadedVideoId] = useState('')
 
@@ -21,11 +58,8 @@ export default function UploadPage() {
     e.preventDefault()
     setDragOver(false)
     const dropped = e.dataTransfer.files[0]
-    if (dropped?.type.startsWith('video/')) {
-      setFile(dropped)
-    } else {
-      toast.error('Only video files are supported')
-    }
+    if (dropped?.type.startsWith('video/')) setFile(dropped)
+    else toast.error('Only video files are supported')
   }, [])
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -42,55 +76,59 @@ export default function UploadPage() {
     e.preventDefault()
     if (!file) { toast.error('Please select a video file'); return }
     if (!form.title.trim()) { toast.error('Please enter a title'); return }
-    if (file.size > 500 * 1024 * 1024) { toast.error('File size cannot exceed 500MB'); return }
+    if (file.size > 2 * 1024 * 1024 * 1024) { toast.error('Max file size is 2 GB'); return }
 
     setUploading(true)
     setProgress(0)
 
-    const formData = new FormData()
-    formData.append('video', file)
-    formData.append('title', form.title.trim())
-    formData.append('description', form.description.trim())
-    formData.append('tags', form.tags)
-
     try {
-      const { data } = await api.post('/videos/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        onUploadProgress: (e) => {
-          const pct = Math.round((e.loaded * 100) / (e.total ?? 1))
-          setProgress(pct)
-        },
+      // ── Step 1: Get Cloudinary signature from backend ───────────────────────
+      setUploadStatus('Preparing upload...')
+      const { data: sigData } = await api.get('/videos/upload-signature')
+
+      // ── Step 2: Upload DIRECTLY to Cloudinary (browser → Cloudinary) ────────
+      setUploadStatus('Uploading to Cloudinary...')
+      const cloudinaryResult = await uploadDirectToCloudinary(file, sigData, setProgress)
+
+      // ── Step 3: Save metadata to backend ────────────────────────────────────
+      setUploadStatus('Saving video...')
+      setProgress(98)
+      const { data } = await api.post('/videos/save', {
+        title: form.title.trim(),
+        description: form.description.trim(),
+        tags: form.tags,
+        cloudinaryUrl: cloudinaryResult.secure_url,
+        cloudinaryPublicId: cloudinaryResult.public_id,
+        size: cloudinaryResult.bytes,
+        format: cloudinaryResult.format,
       })
 
       if (data.success) {
+        setProgress(100)
         setUploaded(true)
         setUploadedVideoId(data.video._id)
         toast.success('Video uploaded successfully!')
       }
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Upload failed')
+      toast.error(err.response?.data?.message || err.message || 'Upload failed')
     } finally {
       setUploading(false)
+      setUploadStatus('')
     }
   }
 
+  // ── Success screen ──────────────────────────────────────────────────────────
   if (uploaded) {
     return (
       <div className="min-h-screen bg-background">
         <Navbar />
-        <div className="max-w-lg mx-auto px-6 pt-32 text-center">
-          <motion.div
-            initial={{ scale: 0.8, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            className="space-y-6"
-          >
+        <div className="max-w-lg mx-auto px-4 pt-32 text-center">
+          <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="space-y-6">
             <div className="w-20 h-20 rounded-full bg-foreground/10 flex items-center justify-center mx-auto">
               <CheckCircle2 size={40} className="text-foreground" />
             </div>
             <h1 className="text-3xl font-semibold">Video Uploaded!</h1>
-            <p className="text-muted-foreground">
-              Your video is live. Now generate access tokens to share it.
-            </p>
+            <p className="text-muted-foreground">Your video is live. Now generate access tokens to share it.</p>
             <div className="flex flex-col sm:flex-row gap-3 justify-center">
               <Link
                 to={`/videos/${uploadedVideoId}`}
@@ -112,19 +150,18 @@ export default function UploadPage() {
     )
   }
 
+  // ── Upload form ─────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
 
-      <div className="max-w-2xl mx-auto px-6 pt-24 pb-16">
-        <motion.div
-          initial={{ opacity: 0, y: -16 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-8"
-        >
+      <div className="max-w-2xl mx-auto px-4 md:px-6 pt-20 md:pt-24 pb-16">
+        <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
           <p className="text-xs tracking-[3px] uppercase text-muted-foreground mb-2">Upload</p>
-          <h1 className="text-3xl font-semibold tracking-tight">Upload Video</h1>
-          <p className="text-muted-foreground text-sm mt-1">MP4, MOV, AVI, MKV, WebM — max 500 MB</p>
+          <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">Upload Video</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            MP4, MOV, AVI, MKV, WebM — up to <strong>2 GB</strong> · Uploads directly to Cloudinary
+          </p>
         </motion.div>
 
         <form onSubmit={handleUpload} className="space-y-6">
@@ -138,30 +175,15 @@ export default function UploadPage() {
             onDragLeave={() => setDragOver(false)}
             onClick={() => !file && fileInputRef.current?.click()}
             className={`relative rounded-2xl border-2 border-dashed transition-all cursor-pointer ${
-              dragOver
-                ? 'border-foreground bg-secondary/30'
-                : file
-                ? 'border-border/50 cursor-default'
-                : 'border-border/40 hover:border-border'
+              dragOver ? 'border-foreground bg-secondary/30'
+              : file ? 'border-border/50 cursor-default'
+              : 'border-border/40 hover:border-border'
             }`}
           >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="video/*"
-              className="hidden"
-              onChange={handleFileChange}
-            />
-
+            <input ref={fileInputRef} type="file" accept="video/*" className="hidden" onChange={handleFileChange} />
             <AnimatePresence mode="wait">
               {file ? (
-                <motion.div
-                  key="file"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="p-6 flex items-center gap-4"
-                >
+                <motion.div key="file" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="p-6 flex items-center gap-4">
                   <div className="w-12 h-12 rounded-xl bg-secondary flex items-center justify-center flex-shrink-0">
                     <Video size={20} className="text-muted-foreground" />
                   </div>
@@ -178,13 +200,7 @@ export default function UploadPage() {
                   </button>
                 </motion.div>
               ) : (
-                <motion.div
-                  key="empty"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="p-12 flex flex-col items-center gap-4"
-                >
+                <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="p-10 md:p-12 flex flex-col items-center gap-4">
                   <div className="w-16 h-16 rounded-2xl bg-secondary flex items-center justify-center">
                     <Upload size={24} className="text-muted-foreground" />
                   </div>
@@ -198,12 +214,7 @@ export default function UploadPage() {
           </motion.div>
 
           {/* Form Fields */}
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.15 }}
-            className="liquid-glass rounded-2xl p-6 space-y-5"
-          >
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="liquid-glass rounded-2xl p-5 md:p-6 space-y-5">
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground font-medium">Title *</label>
               <input
@@ -216,7 +227,6 @@ export default function UploadPage() {
               />
               <div className="text-right text-xs text-muted-foreground">{form.title.length}/100</div>
             </div>
-
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground font-medium">Description</label>
               <textarea
@@ -228,7 +238,6 @@ export default function UploadPage() {
                 className="form-input resize-none"
               />
             </div>
-
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground font-medium">Tags (comma-separated)</label>
               <input
@@ -248,19 +257,25 @@ export default function UploadPage() {
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
-                className="space-y-2"
+                className="liquid-glass rounded-xl p-4 space-y-3"
               >
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>Uploading to Cloudinary...</span>
-                  <span>{progress}%</span>
+                <div className="flex items-center gap-2 text-sm">
+                  <CloudUpload size={14} className="text-muted-foreground animate-pulse" />
+                  <span className="text-muted-foreground">{uploadStatus}</span>
+                  <span className="ml-auto font-medium">{progress}%</span>
                 </div>
-                <div className="progress-bar">
+                <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
                   <motion.div
-                    className="progress-bar-fill"
+                    className="h-full bg-foreground rounded-full"
                     animate={{ width: `${progress}%` }}
                     transition={{ ease: 'linear' }}
                   />
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  {progress < 95
+                    ? '⚡ Uploading directly to Cloudinary — large files supported'
+                    : '✓ Finalizing...'}
+                </p>
               </motion.div>
             )}
           </AnimatePresence>
@@ -276,7 +291,7 @@ export default function UploadPage() {
             {uploading ? (
               <span className="flex items-center justify-center gap-2">
                 <div className="w-4 h-4 border-2 border-background/30 border-t-background rounded-full animate-spin" />
-                Uploading {progress}%...
+                {uploadStatus || `Uploading ${progress}%...`}
               </span>
             ) : (
               <span className="flex items-center justify-center gap-2">
