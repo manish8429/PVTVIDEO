@@ -1,0 +1,70 @@
+# ── Dependencies ─────────────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Environment variables (NEVER commit secrets) ─────────────────────────────
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+backend/.env
+frontend/.env
+# Allow example files to be committed
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+
+# ── Build outputs ─────────────────────────────────────────────────────────────
+dist/
+build/
+frontend/dist/
+frontend/build/
+
+# ── TypeScript ────────────────────────────────────────────────────────────────
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Local uploads (temp) ─────────────────────────────────────────────────────
+uploads/
+backend/uploads/
+temp/
+
+# ── OS files ─────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ── IDE / Editor ─────────────────────────────────────────────────────────────
+.vscode/settings.json
+.vscode/launch.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ── Testing ──────────────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ── Miscellaneous ─────────────────────────────────────────────────────────────
+.cache/
+.parcel-cache/
+.eslintcache
+*.local
